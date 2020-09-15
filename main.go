@@ -1,87 +1,104 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"time"
+	"net/http"
+	"os"
+	"os/signal"
 
-	"github.com/pion/webrtc/v2"
+	"github.com/jessevdk/go-flags"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
+var logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+// Version of the binary, assigned during build.
+var Version string = "dev"
+
+// Options contains the flag options
+type Options struct {
+	Pprof   string `long:"pprof" description:"Bind pprof http server for profiling. (Example: localhost:6060)"`
+	Verbose []bool `short:"v" long:"verbose" description:"Show verbose logging."`
+	Version bool   `long:"version" description:"Print version and exit."`
+
+	Serve struct {
+		Bind    string `long:"bind" description:"Address and port to listen on." default:"0.0.0.0:8080"`
+		DataDir string `long:"datadir" description:"Path for storing the persistent database."`
+	} `command:"serve" description:"Serve a cosm backend."`
+}
+
+func exit(code int, format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(code)
+}
+
 func main() {
-	// Everything below is the Pion WebRTC API! Thanks for using it ❤️.
-
-	// Prepare the configuration
-	config := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
-	}
-
-	// Create a new RTCPeerConnection
-	peerConnection, err := webrtc.NewPeerConnection(config)
+	options := Options{}
+	parser := flags.NewParser(&options, flags.Default)
+	p, err := parser.ParseArgs(os.Args[1:])
 	if err != nil {
-		panic(err)
+		if p == nil {
+			fmt.Println(err)
+		}
+		return
 	}
 
-	// Set the handler for ICE connection state
-	// This will notify you when the peer has connected/disconnected
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("ICE Connection State has changed: %s\n", connectionState.String())
-	})
+	if options.Version {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
 
-	// Register data channel creation handling
-	peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
-		fmt.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
+	switch len(options.Verbose) {
+	case 0:
+		logger = logger.Level(zerolog.WarnLevel)
+	case 1:
+		logger = logger.Level(zerolog.InfoLevel)
+	default:
+		logger = logger.Level(zerolog.DebugLevel)
+	}
 
-		// Register channel opening handling
-		d.OnOpen(func() {
-			fmt.Printf("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n", d.Label(), d.ID())
-
-			for range time.NewTicker(5 * time.Second).C {
-				message := "hi"
-				fmt.Printf("Sending '%s'\n", message)
-
-				// Send the message as text
-				sendErr := d.SendText(message)
-				if sendErr != nil {
-					panic(sendErr)
-				}
+	if options.Pprof != "" {
+		go func() {
+			logger.Debug().Str("bind", options.Pprof).Msg("starting pprof server")
+			if err := http.ListenAndServe(options.Pprof, nil); err != nil {
+				logger.Error().Err(err).Msg("failed to serve pprof")
 			}
-		})
-
-		// Register text message handling
-		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			fmt.Printf("Message from DataChannel '%s': '%s'\n", d.Label(), string(msg.Data))
-		})
-	})
-
-	// Wait for the offer to be pasted
-	offer := webrtc.SessionDescription{}
-	Decode(MustReadStdin(), &offer)
-
-	// Set the remote SessionDescription
-	err = peerConnection.SetRemoteDescription(offer)
-	if err != nil {
-		panic(err)
+		}()
 	}
 
-	// Create an answer
-	answer, err := peerConnection.CreateAnswer(nil)
-	if err != nil {
-		panic(err)
+	var cmd string
+	if parser.Active != nil {
+		cmd = parser.Active.Name
+	}
+	if err := subcommand(cmd, options); err != nil {
+		logger.Error().Err(err).Msgf("failed to run command: %s", cmd)
+		return
+	}
+}
+
+func subcommand(cmd string, options Options) error {
+	// Setup signals
+	ctx, abort := context.WithCancel(context.Background())
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func(abort context.CancelFunc) {
+		<-sigCh
+		logger.Warn().Msg("interrupt received, shutting down")
+		abort()
+		<-sigCh
+		logger.Error().Msg("second interrupt received, panicking")
+		panic("aborted")
+	}(abort)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	switch cmd {
+	case "serve":
+		return serve(ctx, options)
 	}
 
-	// Sets the LocalDescription, and starts our UDP listeners
-	err = peerConnection.SetLocalDescription(answer)
-	if err != nil {
-		panic(err)
-	}
-
-	// Output the answer in base64 so we can paste it in browser
-	fmt.Println(Encode(answer))
-
-	// Block forever
-	select {}
+	return fmt.Errorf("unknown command: %s", cmd)
 }
