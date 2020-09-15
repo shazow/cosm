@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
+	"io"
 
 	"github.com/pion/webrtc/v2"
 	"github.com/rs/zerolog"
@@ -18,8 +18,15 @@ var defaultWebRTCConfig = webrtc.Configuration{
 }
 
 type conn struct {
+	io.ReadWriteCloser
+
 	Peer        *webrtc.PeerConnection
 	DataChannel *webrtc.DataChannel
+}
+
+func (c *conn) open() (err error) {
+	c.ReadWriteCloser, err = c.DataChannel.Detach()
+	return err
 }
 
 type rtcServer struct {
@@ -29,8 +36,9 @@ type rtcServer struct {
 	conns map[uint16]conn
 }
 
-func (s *rtcServer) accept(config webrtc.Configuration, offer <-chan webrtc.SessionDescription) (*webrtc.PeerConnection, error) {
-	peerConnection, err := webrtc.NewPeerConnection(config)
+func (s *rtcServer) accept(api *webrtc.API, config webrtc.Configuration, offers <-chan webrtc.SessionDescription, newConn chan<- conn) (*webrtc.PeerConnection, error) {
+	// Create a new RTCPeerConnection using the API object
+	peerConnection, err := api.NewPeerConnection(config)
 	if err != nil {
 		return nil, err
 	}
@@ -43,55 +51,60 @@ func (s *rtcServer) accept(config webrtc.Configuration, offer <-chan webrtc.Sess
 
 	// Register data channel creation handling
 	peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
-		fmt.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
-
-		// Register channel opening handling
-		d.OnOpen(func() {
-			fmt.Printf("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n", d.Label(), d.ID())
-
-			for range time.NewTicker(5 * time.Second).C {
-				message := "hi"
-				fmt.Printf("Sending '%s'\n", message)
-
-				// Send the message as text
-				sendErr := d.SendText(message)
-				if sendErr != nil {
-					panic(sendErr)
-				}
-			}
-		})
-
-		// Register text message handling
-		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			fmt.Printf("Message from DataChannel '%s': '%s'\n", d.Label(), string(msg.Data))
-		})
+		s.Logger.Debug().Str("label", d.Label()).Interface("id", d.ID()).Msg("new datachannel")
+		newConn <- conn{
+			Peer:        peerConnection,
+			DataChannel: d,
+		}
 	})
 
-	// Set the remote SessionDescription
-	err = peerConnection.SetRemoteDescription(<-offer)
+	// Create an offer to send to the browser
+	offer, err := peerConnection.CreateOffer(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create an answer
-	answer, err := peerConnection.CreateAnswer(nil)
-	if err != nil {
-		return nil, err
-	}
+	// Create channel that is blocked until ICE Gathering is complete
+	gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
 
 	// Sets the LocalDescription, and starts our UDP listeners
-	err = peerConnection.SetLocalDescription(answer)
+	err = peerConnection.SetLocalDescription(offer)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
-	// XXX: Incomplete
-	return peerConnection
+	// Block until ICE Gathering is complete, disabling trickle ICE
+	// we do this because we only can exchange one signaling message
+	// in a production application you should exchange ICE Candidates via OnICECandidate
+	<-gatherComplete
+
+	// Output the offer in base64 so we can paste it in browser
+	fmt.Println(signal.Encode(*peerConnection.LocalDescription()))
+
+	// Wait for the answer to be pasted
+	answer := webrtc.SessionDescription{}
+	signal.Decode(signal.MustReadStdin(), &answer)
+
+	// Apply the answer as the remote description
+	err = peerConnection.SetRemoteDescription(answer)
+
 }
 
 func (s *rtcServer) Serve(ctx context.Context) error {
-	// Create a new RTCPeerConnection
 
-	// Block forever
-	select {}
+	// Create a SettingEngine and enable Detach
+	s := webrtc.SettingEngine{}
+	s.DetachDataChannels()
+
+	// Create an API object with the engine
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+
+	config := defaultWebRTCConfig
+	if s.Config != nil {
+		config = *s.Config
+	}
+
+	for {
+		//	s.accept()
+	}
 }
