@@ -37,9 +37,6 @@ type rtcServer struct {
 	api    *webrtc.API
 
 	HandleConnection func(conn)
-
-	newConn chan conn
-	conns   map[uint16]conn
 }
 
 func (s *rtcServer) init() {
@@ -124,9 +121,13 @@ func (s *rtcServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.Logger.Debug().Str("label", d.Label()).Interface("id", d.ID()).Msg("new datachannel")
-		s.HandleConnection(conn{
+		conn := conn{
 			Peer:        peerConn,
 			DataChannel: d,
-		})
+		}
+		if err := conn.open(); err != nil {
+			s.Logger.Error().Str("label", d.Label()).Interface("id", d.ID()).Err(err).Msg("failed to detach channel")
+		}
+		s.HandleConnection(conn)
 	})
 }

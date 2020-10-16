@@ -19,19 +19,15 @@ func serve(ctx context.Context, options Options) error {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
+	rtc := rtcServer{
+		Logger: logger,
+	}
+	rtc.init()
+
+	r.Get("/rtc", rtc.ServeHTTP)
+
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "Communal.")
-	})
-	r.Post("/api/share", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: CSRF etc
-		timestamp := time.Now().UTC()
-		link := r.FormValue("link")
-		if link == "" {
-			fmt.Fprintf(w, "Empty link :(")
-			return
-		}
-		fmt.Printf("-> %s\t%s\t%s\n", timestamp, r.RemoteAddr, link)
-		fmt.Fprintf(w, "thanks!")
+		http.ServeFile(w, r, "static/index.html")
 	})
 
 	bind := options.Serve.Bind
