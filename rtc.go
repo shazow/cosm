@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -37,47 +36,39 @@ type rtcServer struct {
 	Config *webrtc.Configuration
 	api    *webrtc.API
 
+	HandleConnection func(conn)
+
 	newConn chan conn
 	conns   map[uint16]conn
 }
 
-// accept takes a SessionDescription offer and returns a PeerConnection with a LocalDescription answer that has not been accepted remotely yet.
-// The client must accept the PeerConnection.LocalDescription() for the connection to complete.
-func (s *rtcServer) accept(offer webrtc.SessionDescription) (*webrtc.PeerConnection, error) {
-	cfg := defaultWebRTCConfig
-	if s.Config != nil {
-		cfg = *s.Config
-	}
+func (s *rtcServer) init() {
+	engine := webrtc.SettingEngine{}
+	engine.DetachDataChannels()
+	s.api = webrtc.NewAPI(webrtc.WithSettingEngine(engine))
 
+	if s.Config == nil {
+		s.Config = &defaultWebRTCConfig
+	}
+}
+
+// accept takes a SessionDescription offer and returns a PeerConnection with a
+// LocalDescription answer that has not been accepted remotely yet.
+// The client must accept the PeerConnection.LocalDescription() for the
+// connection to complete.
+func (s *rtcServer) accept(offer webrtc.SessionDescription) (*webrtc.PeerConnection, error) {
 	// Create a new RTCPeerConnection using the API object
-	peerConnection, err := s.api.NewPeerConnection(cfg)
+	peerConnection, err := s.api.NewPeerConnection(*s.Config)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set the handler for ICE connection state
-	// This will notify you when the peer has connected/disconnected
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("ICE Connection State has changed: %s\n", connectionState.String())
-	})
-
-	// Register data channel creation handling
-	/*
-		peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
-			s.Logger.Debug().Str("label", d.Label()).Interface("id", d.ID()).Msg("new datachannel")
-			newConn <- conn{
-				Peer:        peerConnection,
-				DataChannel: d,
-			}
-		})
-	*/
-
-	// Set the remote SessionDescription
+	// Set the remote SessionDescription (offer received from peer)
 	if err := peerConnection.SetRemoteDescription(offer); err != nil {
 		return nil, err
 	}
 
-	// Create an answer
+	// Create an answer (sent back to the peer)
 	answer, err := peerConnection.CreateAnswer(nil)
 	if err != nil {
 		return nil, err
@@ -96,6 +87,11 @@ func (s *rtcServer) accept(offer webrtc.SessionDescription) (*webrtc.PeerConnect
 }
 
 func (s *rtcServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.HandleConnection == nil {
+		http.Error(w, "not set to handle new connections", http.StatusInternalServerError)
+		return
+	}
+
 	var offer webrtc.SessionDescription
 	if err := Decode(r.FormValue("offer"), &offer); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -128,22 +124,9 @@ func (s *rtcServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.Logger.Debug().Str("label", d.Label()).Interface("id", d.ID()).Msg("new datachannel")
-		s.newConn <- conn{
+		s.HandleConnection(conn{
 			Peer:        peerConn,
 			DataChannel: d,
-		}
+		})
 	})
-}
-
-func (s *rtcServer) Serve(ctx context.Context) error {
-	// Create a SettingEngine and enable Detach
-	engine := webrtc.SettingEngine{}
-	engine.DetachDataChannels()
-
-	// Create an API object with the engine
-	s.api = webrtc.NewAPI(webrtc.WithSettingEngine(engine))
-
-	for {
-		//	s.accept()
-	}
 }
