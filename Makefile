@@ -16,7 +16,7 @@ clean:
 	rm $(BINARY)
 
 run: $(BINARY)
-	$(RUN) --help
+	$(RUN) -vv serve
 
 test:
 	go test -vet "all" -timeout 5s -race ./...

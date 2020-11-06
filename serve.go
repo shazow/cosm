@@ -30,6 +30,9 @@ func serve(ctx context.Context, options Options) error {
 		http.ServeFile(w, r, "static/index.html")
 	})
 
+	// TODO: endless doesn't support clean shutdown? With stdlib http, could do
+	// <-ctx.Done(); server.Shutdown(context.Background())
+
 	bind := options.Serve.Bind
 	fmt.Fprintf(os.Stderr, "listening on %s\n", bind)
 	return endless.ListenAndServe(bind, r)
