@@ -21,6 +21,10 @@ func serve(ctx context.Context, options Options) error {
 
 	rtc := rtcServer{
 		Logger: logger,
+		HandleConnection: func(conn rtcConn) {
+			logger.Info().Interface("conn", conn).Msg("new connection")
+			fmt.Fprintf(conn, "hello\r\n")
+		},
 	}
 	rtc.init()
 

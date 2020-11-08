@@ -19,14 +19,14 @@ var defaultWebRTCConfig = webrtc.Configuration{
 	},
 }
 
-type conn struct {
+type rtcConn struct {
 	io.ReadWriteCloser
 
 	Peer        *webrtc.PeerConnection
 	DataChannel *webrtc.DataChannel
 }
 
-func (c *conn) open() (err error) {
+func (c *rtcConn) open() (err error) {
 	c.ReadWriteCloser, err = c.DataChannel.Detach()
 	return err
 }
@@ -36,7 +36,7 @@ type rtcServer struct {
 	Config *webrtc.Configuration
 	api    *webrtc.API
 
-	HandleConnection func(conn)
+	HandleConnection func(rtcConn)
 }
 
 func (s *rtcServer) init() {
@@ -91,19 +91,24 @@ func (s *rtcServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var offer webrtc.SessionDescription
 	if err := Decode(r.FormValue("offer"), &offer); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "failed to parse offer: "+err.Error(), http.StatusBadRequest)
+		return
 	}
+
+	logger.Debug().Interface("offer", offer).Msg("accepting offer")
 
 	peerConn, err := s.accept(offer)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "failed to accept offer: "+err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	w.Header().Set("content-type", "application/json")
 
 	answer := peerConn.LocalDescription()
 	if err := json.NewEncoder(w).Encode(answer); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to encode answer: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -121,7 +126,7 @@ func (s *rtcServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.Logger.Debug().Str("label", d.Label()).Interface("id", d.ID()).Msg("new datachannel")
-		conn := conn{
+		conn := rtcConn{
 			Peer:        peerConn,
 			DataChannel: d,
 		}

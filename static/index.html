@@ -9,65 +9,37 @@
         }
       ]
     })
-    let log = msg => {
-      document.getElementById('logs').innerHTML += msg + '<br>'
-    }
 
-    pc.onsignalingstatechange = e => log(pc.signalingState)
-    pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
-    pc.onicecandidate = event => {
-      if (event.candidate === null) {
-        document.getElementById('localSessionDescription').value = btoa(JSON.stringify(pc.localDescription))
-      }
-    }
+    pc.onsignalingstatechange = e => console.log("onsignalstatechane", pc.signalingState)
+    pc.oniceconnectionstatechange = e => console.log("oniceconnectionstatechange", pc.iceConnectionState)
 
     pc.ondatachannel = e => {
       let dc = e.channel
-      log('New DataChannel ' + dc.label)
+      console.log('New DataChannel ' + dc.label)
       dc.onclose = () => console.log('dc has closed')
       dc.onopen = () => console.log('dc has opened')
-      dc.onmessage = e => log(\`Message from DataChannel '${dc.label}' payload '${e.data}`)
+      dc.onmessage = (e) => console.log("dc.onmessage", dc.label, e.data);
       window.sendMessage = () => {
-        let message = document.getElementById('message').value
-        if (message === '') {
-          return alert('Message must not be empty')
-        }
-
         dc.send(message)
       }
     }
 
-    window.startSession = () => {
-      let sd = document.getElementById('remoteSessionDescription').value
-      if (sd === '') {
-        return alert('Session Description must not be empty')
-      }
-
-      pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(atob(sd)))).catch(log)
-      pc.createAnswer().then(d => pc.setLocalDescription(d)).catch(log)
+    window.onload = async () => {
+        const offer = await pc.createOffer();
+        pc.setLocalDescription(offer);
+        const encodedOffer = btoa(JSON.stringify({
+            type: "offer",
+            sdp: pc.localDescription,
+        }));
+        const r = await fetch("/rtc?offer=" + encodedOffer);
+        console.log(r)
     }
 
 </script>
 </head>
 <body>
 
-    Golang base64 Session Description<br />
-    <textarea id="remoteSessionDescription"></textarea> <br/>
-    <button onclick="window.startSession()"> Start Session </button> <br />
-
-    Browser base64 Session Description<br />
-    <textarea id="localSessionDescription" readonly="true"></textarea> <br />
-
-    <br />
-
-    Message<br />
-    <textarea id="message">This is my DataChannel message!</textarea> <br/>
-    <button onclick="window.sendMessage()"> Send Message </button> <br />
-
-    <br />
-
-    Logs<br />
-    <div id="logs"></div>
+    Cosm.
 
 </body>
 </html>
