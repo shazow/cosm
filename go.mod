@@ -8,6 +8,7 @@ require (
 	github.com/golang/protobuf v1.4.3 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/jessevdk/go-flags v1.4.0
+	github.com/kr/pretty v0.2.0 // indirect
 	github.com/lucas-clemente/quic-go v0.18.1 // indirect
 	github.com/marten-seemann/qtls-go1-15 v0.1.1 // indirect
 	github.com/pion/dtls/v2 v2.0.3 // indirect
@@ -21,4 +22,5 @@ require (
 	golang.org/x/net v0.0.0-20201031054903-ff519b6c9102 // indirect
 	golang.org/x/sys v0.0.0-20201106081118-db71ae66460a // indirect
 	google.golang.org/protobuf v1.25.0 // indirect
+	gopkg.in/yaml.v3 v3.0.0-20200605160147-a5ece683394c // indirect
 )
