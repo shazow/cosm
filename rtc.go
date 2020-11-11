@@ -41,7 +41,7 @@ type rtcServer struct {
 
 func (s *rtcServer) init() {
 	engine := webrtc.SettingEngine{}
-	engine.DetachDataChannels()
+	//engine.DetachDataChannels()
 	s.api = webrtc.NewAPI(webrtc.WithSettingEngine(engine))
 
 	if s.Config == nil {

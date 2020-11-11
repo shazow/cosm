@@ -2,15 +2,15 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/pion/webrtc/v2"
 )
 
 func TestRTC(t *testing.T) {
-	srv := rtcServer{}
+	srv := rtcServer{
+		Config: &webrtc.Configuration{},
+	}
 	srv.init()
 	api := srv.api
 
@@ -25,8 +25,6 @@ func TestRTC(t *testing.T) {
 		t.Fatal("failed to prepare offer", err)
 	}
 
-	ready := make(chan struct{})
-
 	offerPC.OnDataChannel(func(d *webrtc.DataChannel) {
 		t.Log("offerPC.OnDataChannel", d)
 	})
@@ -36,7 +34,6 @@ func TestRTC(t *testing.T) {
 	}
 	offerDC.OnOpen(func() {
 		t.Log("offerDC.OnOpen")
-		ready <- struct{}{}
 	})
 
 	// rtcServer.accept handles:
@@ -50,15 +47,6 @@ func TestRTC(t *testing.T) {
 	}
 	defer rtcConn.Close()
 
-	// Acquire answer
-	answer := rtcConn.LocalDescription()
-	if err = offerPC.SetRemoteDescription(*answer); err != nil {
-		t.Fatal(err)
-	}
-	t.Log("offer: ", offerSession)
-	t.Log("answer: ", answer)
-
-	t.Log("waiting for data channel")
 	rtcConn.OnDataChannel(func(dc *webrtc.DataChannel) {
 		t.Log("rtcConn.OnDataChannel", dc)
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -67,13 +55,29 @@ func TestRTC(t *testing.T) {
 		})
 	})
 
+	// Acquire answer
+	answer := rtcConn.LocalDescription()
+	if err = offerPC.SetRemoteDescription(*answer); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("offer: ", offerSession)
+	t.Log("answer: ", answer)
+
+	t.Log("Waiting for data channel to open")
+	open := make(chan struct{})
+	offerDC.OnOpen(func() {
+		open <- struct{}{}
+	})
+	<-open
+	t.Log("data channel opened")
+
 	received := make(chan []byte)
 	offerDC.OnMessage(func(msg webrtc.DataChannelMessage) {
 		t.Log("offerDC.OnMessage", msg)
 		received <- msg.Data
 	})
 
-	<-ready
 	if err := offerDC.Send([]byte("Ping")); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +88,6 @@ func TestRTC(t *testing.T) {
 	} else {
 		t.Logf("received response: %s", got)
 	}
-
 }
 
 // prepareOffer sets up the signal of the offer side of the peer connection.
@@ -114,60 +117,4 @@ func prepareOffer(pc *webrtc.PeerConnection) (*webrtc.SessionDescription, error)
 	}
 
 	return <-offerCh, nil
-}
-
-// signalPair is borrowed from https://github.com/pion/webrtc/blob/v2/peerconnection_test.go
-func signalPair(pcOffer *webrtc.PeerConnection, pcAnswer *webrtc.PeerConnection) error {
-	iceGatheringState := pcOffer.ICEGatheringState()
-	offerChan := make(chan webrtc.SessionDescription, 1)
-
-	if iceGatheringState != webrtc.ICEGatheringStateComplete {
-		pcOffer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-			if candidate == nil {
-				offerChan <- *pcOffer.PendingLocalDescription()
-			}
-		})
-	}
-	// Note(albrow): We need to create a data channel in order to trigger ICE
-	// candidate gathering in the background for the JavaScript/Wasm bindings. If
-	// we don't do this, the complete offer including ICE candidates will never be
-	// generated.
-	if _, err := pcOffer.CreateDataChannel("initial_data_channel", nil); err != nil {
-		return err
-	}
-
-	offer, err := pcOffer.CreateOffer(nil)
-	if err != nil {
-		return err
-	}
-	if err := pcOffer.SetLocalDescription(offer); err != nil {
-		return err
-	}
-
-	if iceGatheringState == webrtc.ICEGatheringStateComplete {
-		offerChan <- offer
-	}
-	select {
-	case <-time.After(3 * time.Second):
-		return fmt.Errorf("timed out waiting to receive offer")
-	case offer := <-offerChan:
-		if err := pcAnswer.SetRemoteDescription(offer); err != nil {
-			return err
-		}
-
-		answer, err := pcAnswer.CreateAnswer(nil)
-		if err != nil {
-			return err
-		}
-
-		if err = pcAnswer.SetLocalDescription(answer); err != nil {
-			return err
-		}
-
-		err = pcOffer.SetRemoteDescription(answer)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
 }
