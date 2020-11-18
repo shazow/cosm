@@ -10,6 +10,7 @@ import (
 	"github.com/fvbock/endless"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"github.com/pion/webrtc/v2"
 )
 
 func serve(ctx context.Context, options Options) error {
@@ -27,6 +28,9 @@ func serve(ctx context.Context, options Options) error {
 				if err := conn.DataChannel.SendText("hello"); err != nil {
 					logger.Error().Err(err).Msg("data channel send failed")
 				}
+			})
+			conn.DataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+				logger.Debug().Bytes("data", msg.Data).Msg("message received")
 			})
 		},
 	}
