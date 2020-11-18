@@ -44,7 +44,7 @@ pc.onnegotiationneeded = async () => {
 }
 
 window.onload = async () => {
-    channel = pc.createDataChannel('chat', {negotiated: true, id: 0});
+    channel = pc.createDataChannel('chat');
     channel.onopen = () => {
         console.log("onopen")
         channel.send("Ping")

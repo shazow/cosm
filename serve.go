@@ -23,9 +23,11 @@ func serve(ctx context.Context, options Options) error {
 		Logger: logger,
 		HandleConnection: func(conn rtcConn) {
 			logger.Info().Interface("conn", conn).Msg("new connection")
-			if err := conn.DataChannel.SendText("hello"); err != nil {
-				logger.Error().Err(err).Msg("data channel send failed")
-			}
+			conn.DataChannel.OnOpen(func() {
+				if err := conn.DataChannel.SendText("hello"); err != nil {
+					logger.Error().Err(err).Msg("data channel send failed")
+				}
+			})
 		},
 	}
 	rtc.init()
