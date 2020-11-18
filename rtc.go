@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
@@ -20,15 +19,13 @@ var defaultWebRTCConfig = webrtc.Configuration{
 }
 
 type rtcConn struct {
-	io.ReadWriteCloser
-
 	Peer        *webrtc.PeerConnection
 	DataChannel *webrtc.DataChannel
 }
 
 func (c *rtcConn) open() (err error) {
-	c.ReadWriteCloser, err = c.DataChannel.Detach()
-	return err
+	// c.ReadWriteCloser, err = c.DataChannel.Detach()
+	return nil
 }
 
 type rtcServer struct {
