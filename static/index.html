@@ -2,38 +2,55 @@
 <head>
 <script>
 
-    let pc = new RTCPeerConnection({
-      iceServers: [
-        {
-          urls: 'stun:stun.l.google.com:19302'
-        }
-      ]
-    })
+let pc = new RTCPeerConnection({
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }
+    ]
+});
 
-    pc.onsignalingstatechange = e => console.log("onsignalstatechane", pc.signalingState)
-    pc.oniceconnectionstatechange = e => console.log("oniceconnectionstatechange", pc.iceConnectionState)
+pc.onsignalingstatechange = e => console.log("onsignalstatechane", pc.signalingState)
+pc.oniceconnectionstatechange = e => console.log("oniceconnectionstatechange", pc.iceConnectionState)
 
-    pc.ondatachannel = e => {
-      let dc = e.channel
-      console.log('New DataChannel ' + dc.label)
-      dc.onclose = () => console.log('dc has closed')
-      dc.onopen = () => console.log('dc has opened')
-      dc.onmessage = (e) => console.log("dc.onmessage", dc.label, e.data);
-      window.sendMessage = () => {
-        dc.send(message)
-      }
+pc.ondatachannel = e => {
+    let dc = e.channel
+    console.log('New DataChannel ' + dc.label)
+    dc.onclose = () => console.log('dc has closed')
+    dc.onopen = () => console.log('dc has opened')
+    dc.onmessage = (e) => console.log("dc.onmessage", dc.label, e.data);
+}
+
+pc.onicecandidate = async (event) => {
+    console.log("onicecandidate", event.candidate)
+    if (event.candidate !== null) {
+        // Got a new candidate, keep waiting
+        return
     }
 
-    window.onload = async () => {
-        const offer = await pc.createOffer();
-        pc.setLocalDescription(offer);
-        const encodedOffer = btoa(JSON.stringify({
-            type: "offer",
-            sdp: pc.localDescription,
-        }));
-        const r = await fetch("/rtc?offer=" + encodedOffer);
-        console.log(r)
+    await pc.setLocalDescription();
+    const encodedOffer = btoa(JSON.stringify(pc.localDescription));
+    console.log("encodedOffer", atob(encodedOffer));
+    const r = await fetch("/rtc?offer=" + encodedOffer);
+
+    const answer = await r.json()
+    console.log("got response, setting remote description", answer)
+
+    await pc.setRemoteDescription(answer);
+}
+
+pc.onnegotiationneeded = async () => {
+    console.log("onnegotiationneeded")
+
+    await pc.setLocalDescription();
+}
+
+window.onload = async () => {
+    channel = pc.createDataChannel('chat', {negotiated: true, id: 0});
+    channel.onopen = () => {
+        console.log("onopen")
+        channel.send("Ping")
     }
+    channel.onmessage = ({data}) => console.log("onmessage", data);
+}
 
 </script>
 </head>
